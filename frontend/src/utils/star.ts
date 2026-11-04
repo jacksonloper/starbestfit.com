@@ -83,7 +83,7 @@
 import { Temporal } from '@js-temporal/polyfill'
 
 import { PersonResponse, TimeScore } from '/src/config/api'
-import { Availability, calculateAvailability, NameScore } from '/src/utils/calculateAvailability'
+import { calculateAvailability, NameScore } from '/src/utils/calculateAvailability'
 
 import { convertTimesToDates } from './convertTimesToDates'
 
