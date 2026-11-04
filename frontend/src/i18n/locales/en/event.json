@@ -56,8 +56,6 @@
     "best_fit1": "For an event duration of",
     "best_fit2": "the best time is <1>{{time}}</1>",
     "best_fit2_tied": "the best times are tied: <1>{{times}}</1>",
-    "more_times_one": "{{count}} more",
-    "more_times_other": "{{count}} more",
     "finalists_two": "<strong>{{top}}</strong> and <strong>{{next}}</strong> scored the highest with {{topStars}} and {{nextStars}}.",
     "finalists_top_one": "<strong>{{top}}</strong> scored the highest with {{topStars}}, and {{count}} times tied for the next highest score with {{nextStars}}.",
     "finalists_top_tied": "{{count}} times tied for the highest score with {{stars}}.",

@@ -116,19 +116,15 @@ const AvailabilityViewer = ({ times, people, table, eventId, timeFormat, timezon
       return items.join(', ')
     }
   }
-  // Ties for best can be long (e.g. a single person giving the same score
-  // everywhere), so only list the first few times
-  const MAX_BEST_TIMES_LISTED = 3
   const star = useMemo(() => {
     const best = results.bestTimes.map(formatTime)
     const finalists = results.finalists.map(formatTime)
-    const listed = best.slice(0, MAX_BEST_TIMES_LISTED).map(b => b.time)
-    const unlisted = best.length - listed.length
     const hasVotes = results.firstVotes !== undefined && results.secondVotes !== undefined
     return {
       best,
       finalists,
-      bestList: formatList(unlisted > 0 ? [...listed, t('group.more_times', {count: unlisted})] : listed),
+      // all tied times, highest total score first
+      bestList: formatList(best.map(b => b.time)),
       firstVotes: hasVotes ? formatPeople(results.firstVotes as number) : undefined,
       secondVotes: hasVotes ? formatPeople(results.secondVotes as number) : undefined,
       noPrefVotes: hasVotes

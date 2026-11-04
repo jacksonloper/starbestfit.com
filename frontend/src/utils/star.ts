@@ -63,7 +63,8 @@
  * 2. Runoff round. Every pair of finalists is compared head-to-head: a person
  *    prefers the time they gave the higher (averaged) score. The best times
  *    are the finalists that win or tie *every* head-to-head matchup against
- *    the other finalists. All of them are shown as tied for best.
+ *    the other finalists. All of them are shown as tied for best, highest
+ *    total score first.
  *
  * 3. Cycles. It is possible that every finalist loses at least one matchup
  *    (A beats B, B beats C, C beats A). Then no time satisfies rule 2, and we
@@ -220,8 +221,9 @@ export type TieBreak =
   | 'mostWins'
 
 export interface StarResults {
-  // All times tied for best (see "Explicit Tiebreaking" above), in
-  // chronological order. Empty when there are no candidates, e.g. no people.
+  // All times tied for best (see "Explicit Tiebreaking" above), highest
+  // total score first, then chronological. Empty when there are no
+  // candidates, e.g. no people.
   bestTimes: TimeScore[],
   // The times compared head-to-head to decide the best time: every time with
   // the highest score if two or more share it, otherwise the highest scoring
@@ -479,6 +481,8 @@ const calculateStarBest = (
   const toTimeScore = (c: Candidate): TimeScore => ({ time: c.date, score: c.score / numTimeslots })
   const byTime = (a: Candidate, b: Candidate): number =>
     Temporal.ZonedDateTime.compare(timeMap[a.date], timeMap[b.date])
+  const byScoreThenTime = (a: Candidate, b: Candidate): number =>
+    (b.score - a.score) || byTime(a, b)
 
   // special cases
   if (candidates.length === 0) {
@@ -523,7 +527,7 @@ const calculateStarBest = (
   }
 
   const result: StarResults = {
-    bestTimes: best.map(toTimeScore),
+    bestTimes: best.sort(byScoreThenTime).map(toTimeScore),
     finalists: finalists.map(toTimeScore),
     numTopScorers: topScorers.length,
     tieBreak,
