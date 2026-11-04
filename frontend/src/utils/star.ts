@@ -45,7 +45,43 @@
  * overlap, and the second choice option is a more interesting alternative.
  *
  *
- * # Tiebreaking Rules
+ * # Explicit Tiebreaking
+ *
+ * The official STAR protocol resolves every tie down to a single winner,
+ * ultimately with a coin toss. For scheduling, a coin toss hides information:
+ * if two times are genuinely tied, the group should see both and decide for
+ * themselves. So instead of picking exactly two finalists and exactly one
+ * winner, we compute a *set* of best times using only head-to-head matchups:
+ *
+ * 1. Scoring round. Let N be the number of times sharing the highest total
+ *    score and M the number sharing the second highest.
+ *    - If N >= 2, the finalists are the N top scoring times.
+ *    - If N == 1, the finalists are the top scoring time plus the M second
+ *      highest scoring times (N + M finalists in total).
+ *    This is the set of times that could have made the official runoff.
+ *
+ * 2. Runoff round. Every pair of finalists is compared head-to-head: a person
+ *    prefers the time they gave the higher (averaged) score. The best times
+ *    are the finalists that win or tie *every* head-to-head matchup against
+ *    the other finalists. All of them are shown as tied for best.
+ *
+ * 3. Cycles. It is possible that every finalist loses at least one matchup
+ *    (A beats B, B beats C, C beats A). Then no time satisfies rule 2, and we
+ *    fall back to the official STAR tiebreakers that do not involve a coin
+ *    toss: the finalists with the most head-to-head wins, then among those the
+ *    finalists with the most five-star ratings (see below). Whatever is still
+ *    tied after that is shown as tied for best.
+ *
+ * Note the differences from the official protocol, which are deliberate:
+ * - Official STAR breaks a scoring-round tie by *most* head-to-head wins;
+ *   we require *no* head-to-head losses, which is stricter and can disagree
+ *   (e.g. a time that ties everyone else has zero wins but zero losses).
+ * - Official STAR breaks a runoff tie in favour of the higher scored time;
+ *   we show a runoff tie as a tie, even when one of the two had the higher
+ *   score.
+ * - Official STAR picks a single second finalist from among tied second
+ *   scorers; we compare against all of them at once.
+ * - The result never depends on a coin toss.
  *
  * ## 5-Star Tiebreaking Rule
  *
@@ -80,8 +116,11 @@
  *
  * ## Coin Toss Tiebreaking Rule
  *
- * Since results are computed anytime the page is loaded, we need a way to
- * deterministically compute coin toss results. We do this by seeding a
+ * The displayed result never depends on a coin toss, but one is still needed
+ * to pick the single highest scoring candidate that anchors the overlap
+ * exclusion above (when several top scorers overlap each other, one of them
+ * has to go). Since results are computed anytime the page is loaded, we need a
+ * way to deterministically compute coin toss results. We do this by seeding a
  * pseudorandom number generator with the event id, then drawing a pseudorandom
  * number in the range 0-1 for each possible timeslot in a determined order.
  * When tiebreaking, the time with the higher random number is determined to be
@@ -90,13 +129,12 @@
  *
  * # Tabulation Implementation
  *
- * Tabulation is broken into "full rounds" and "mini rounds". Full rounds have a
- * fixed number of winners, and use tiebreaking protocols to resolve ties. In
- * STAR, the scoring round and the runoff round are both full rounds.
- *
- * A full round is implemented as a series of mini rounds. Each mini round
- * attempts to find winners according to a single metric. If there are tied
- * candidates in the round, they are passed to the next mini round for
+ * The overlap exclusion step uses the official STAR tiebreaking chain to pick
+ * one top scorer. It is implemented as a "full round" made of "mini rounds".
+ * A full round has a fixed number of winners, and uses tiebreaking protocols
+ * to resolve ties. It is implemented as a series of mini rounds. Each mini
+ * round attempts to find winners according to a single metric. If there are
+ * tied candidates in the round, they are passed to the next mini round for
  * tiebreaking. The possible mini round types are:
  *
  * - "score": winners are the candidates that received the highest scores
@@ -107,12 +145,11 @@
  * - "random": a random ordering is assigned to each candidate, resolving any
  *   remaining ties
  *
- * The mini rounds that make the STAR scoring round are: score, rankedRobin,
- * fiveStars, then random. Two winners are picked.
+ * The mini rounds used to pick the overlap anchor are: score, rankedRobin,
+ * fiveStars, then random. One winner is picked.
  *
- * The mini rounds in the runoff are: rankedRobin, score, fiveStars, then
- * random. One winner is picked from the two candidates that advanced from the
- * scoring round.
+ * The best time itself is then computed as described under "Explicit
+ * Tiebreaking" in `calculateStarBest`.
  *
  *
  * # Inspection
@@ -121,20 +158,16 @@
  * console. You can look at this object to better understand how a result was
  * computed.
  *
- * The top-level object contains info for the scoring round, the runoff round,
- * and the final results to display. The rounds list the candidates going into
- * the round, the mini rounds used in the computation, and the winner(s) of the
- * round.
- *
- * The mini round objects include the mini round type, the candidates going into
- * the mini round with updated metrics (rank wins are calculated at the start of
- * the mini round), the winner(s), and any candidates that are still tied.
+ * The top-level object contains info for the scoring round (the top and second
+ * scores and the finalists), the runoff round (the head-to-head matchup
+ * matrix, each finalist's wins and losses, which tiebreak rule applied, and
+ * the best candidates), and the final results to display.
  *
  * Candidate objects include the time ("date") of the candidate in UTC, the
  * scores each person gave to a full event of the desired duration if it starts
- * at that time, and the metrics used to compute mini round results (the total
- * score given to the time, number of ranked wins if it's a rankedRobin round,
- * the number of five-stars, and the random tie value)
+ * at that time, and the metrics used in tabulation (the total score given to
+ * the time, number of head-to-head wins among the finalists, the number of
+ * five-stars, and the random tie value)
  */
 
 import { Temporal } from '@js-temporal/polyfill'
@@ -176,12 +209,35 @@ export const averageAndRound = (score: number, numPeople: number): number => {
 
 /***** STAR Voting Tabulation *****/
 
+export type TieBreak =
+  // there was only one candidate, so no comparisons were needed
+  | 'none'
+  // bestTimes are exactly the finalists that won or tied every head-to-head
+  // matchup against the other finalists
+  | 'headToHead'
+  // no finalist won or tied every matchup (a cycle), so bestTimes are the
+  // finalists with the most head-to-head wins, then the most five-star ratings
+  | 'mostWins'
+
 export interface StarResults {
-  bestTime?: TimeScore,
-  nextBest?: TimeScore,
-  // these are defined if both bestTime and nextTime are defined
-  bestVotes?: number, // number of people that preferred the best time
-  nextVotes?: number, // number of people that preferred the next best time
+  // All times tied for best (see "Explicit Tiebreaking" above), in
+  // chronological order. Empty when there are no candidates, e.g. no people.
+  bestTimes: TimeScore[],
+  // The times compared head-to-head to decide the best time: every time with
+  // the highest score if two or more share it, otherwise the highest scoring
+  // time followed by every time with the second highest score. Each group is
+  // in chronological order.
+  finalists: TimeScore[],
+  // Number of finalists that share the highest score (N in the docstring)
+  numTopScorers: number,
+  // How bestTimes were separated from the other finalists (undefined when
+  // there are no candidates)
+  tieBreak?: TieBreak,
+  // Defined only when there are exactly two finalists: the number of people
+  // who preferred finalists[0] over finalists[1], and vice versa. People with
+  // no preference are not counted in either.
+  firstVotes?: number,
+  secondVotes?: number,
 }
 
 export const calculateBestTime = (
@@ -192,12 +248,7 @@ export const calculateBestTime = (
   timeMap: TimeMap,
 ): StarResults => {
   if (people.length === 0) {
-    return ({
-      bestTime: undefined,
-      nextBest: undefined,
-      bestVotes: undefined,
-      nextVotes: undefined,
-    })
+    return ({ bestTimes: [], finalists: [], numTopScorers: 0 })
   }
   const t0 = performance.now()
   // An bug was encountered in which there was a duplicated 24-hour block at
@@ -210,7 +261,7 @@ export const calculateBestTime = (
   let candidates =
     calculateSimpleCandidateMetrics(dateCollated.availabilities, duration, eventId)
   candidates = removeOverlapsWithTopScorer(candidates, duration, timeMap)
-  const out = calculateStarBest(candidates, duration)
+  const out = calculateStarBest(candidates, duration, timeMap)
   console.log(
     'Completed STAR best fit calculation in ' + (performance.now() - t0) + ' ms'
   )
@@ -400,58 +451,99 @@ const removeOverlapsWithTopScorer = (
   return candidates
 }
 
-// Calculate the STAR Voting best pick
+// Calculate the number of people preferring each finalist over each other
+// finalist. matchups[i][j] is the number of people who scored finalist i
+// strictly higher than finalist j (treating an absent score as zero).
+const calculateMatchups = (finalists: Candidate[]): number[][] => {
+  const n = finalists.length
+  const matchups: number[][] = Array.from({ length: n }, () => Array<number>(n).fill(0))
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      matchups[i][j] = calculateRankedWinsBetweenPair(finalists[i].people, finalists[j].people)
+      matchups[j][i] = calculateRankedWinsBetweenPair(finalists[j].people, finalists[i].people)
+    }
+  }
+  return matchups
+}
+
+// Calculate the STAR Voting best pick with explicit tiebreaking (see the
+// "Explicit Tiebreaking" section of the docstring)
 const calculateStarBest = (
   candidates: Candidate[],
   duration: number,
+  timeMap: TimeMap,
 ): StarResults => {
   const numTimeslots = duration / TIMESLOT_MINUTES
+  // divide by numTimeslots when returning results
+  // (dividing by the number of people is done before displaying)
+  const toTimeScore = (c: Candidate): TimeScore => ({ time: c.date, score: c.score / numTimeslots })
+  const byTime = (a: Candidate, b: Candidate): number =>
+    Temporal.ZonedDateTime.compare(timeMap[a.date], timeMap[b.date])
+
   // special cases
   if (candidates.length === 0) {
-    return {
-      bestTime: undefined,
-      nextBest: undefined,
-      bestVotes: undefined,
-      nextVotes: undefined,
-    }
+    return { bestTimes: [], finalists: [], numTopScorers: 0 }
   }
   if (candidates.length === 1) {
-    return {
-      bestTime: {
-        time: candidates[0].date,
-        // divide by numTimeslots when returning results
-        // (dividing by the number of people is done before displaying)
-        score: candidates[0].score / numTimeslots,
-      },
-      nextBest: undefined,
-      bestVotes: undefined,
-      nextVotes: undefined,
-    }
+    const only = toTimeScore(candidates[0])
+    return { bestTimes: [only], finalists: [only], numTopScorers: 1, tieBreak: 'none' }
   }
-  // scoring round -> find the top two by score
-  const scoreRound =
-    calculateFullRound(2, candidates, ["score", "rankedRobin", "fiveStars", "random"])
-  // runoff round -> find the winner by rankings
-  const runoffRound =
-    calculateFullRound(1, scoreRound.winners, ["rankedRobin", "score", "fiveStars", "random"])
-  const winner = runoffRound.winners[0] as Candidate
-  const second =
-    scoreRound.winners.find((w: Candidate) => w.date !== winner.date) as Candidate
-  const bestVotes = getMetric(winner, "rankedRobin")
-  const nextVotes = getMetric(second, "rankedRobin")
-  const result = ({
-    bestTime: {
-      time: winner.date,
-      score: winner.score / numTimeslots,
+
+  // scoring round -> every time with the highest score is a finalist. If only
+  // one time has the highest score, every time with the second highest score
+  // is also a finalist.
+  const topScore = Math.max(...candidates.map(c => c.score))
+  const topScorers = candidates.filter(c => c.score === topScore).sort(byTime)
+  let secondScore: number | undefined = undefined
+  let finalists = topScorers
+  if (topScorers.length === 1) {
+    const rest = candidates.filter(c => c.score !== topScore)
+    secondScore = Math.max(...rest.map(c => c.score))
+    finalists = topScorers.concat(rest.filter(c => c.score === secondScore).sort(byTime))
+  }
+
+  // runoff round -> the best times are the finalists that win or tie every
+  // head-to-head matchup against the other finalists
+  const matchups = calculateMatchups(finalists)
+  const beats = (i: number, j: number): boolean => matchups[i][j] > matchups[j][i]
+  const wins = finalists.map((_, i) => finalists.filter((_, j) => beats(i, j)).length)
+  const losses = finalists.map((_, i) => finalists.filter((_, j) => beats(j, i)).length)
+  finalists.forEach((f, i) => { f.rankedWins = wins[i] })
+  let best = finalists.filter((_, i) => losses[i] === 0)
+  let tieBreak: TieBreak = 'headToHead'
+  if (best.length === 0) {
+    // Every finalist loses at least one matchup (a cycle). Fall back to the
+    // official STAR tiebreakers that do not involve a coin toss, and show
+    // every time that is still tied after them.
+    tieBreak = 'mostWins'
+    const maxWins = Math.max(...wins)
+    best = finalists.filter((_, i) => wins[i] === maxWins)
+    const maxFiveStars = Math.max(...best.map(c => c.fiveStars))
+    best = best.filter(c => c.fiveStars === maxFiveStars)
+  }
+
+  const result: StarResults = {
+    bestTimes: best.map(toTimeScore),
+    finalists: finalists.map(toTimeScore),
+    numTopScorers: topScorers.length,
+    tieBreak,
+  }
+  if (finalists.length === 2) {
+    result.firstVotes = matchups[0][1]
+    result.secondVotes = matchups[1][0]
+  }
+  console.log(({
+    scoringRound: { topScore, secondScore, finalists: structuredClone(finalists) },
+    runoffRound: {
+      // matchups[i][j] = people preferring finalists[i] over finalists[j]
+      matchups,
+      wins,
+      losses,
+      tieBreak,
+      best: structuredClone(best),
     },
-    nextBest: {
-      time: second.date,
-      score: second.score / numTimeslots,
-    },
-    bestVotes,
-    nextVotes,
-  })
-  console.log(({ scoreRound, runoffRound, result }))
+    result,
+  }))
   return result
 }
 
