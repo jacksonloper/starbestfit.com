@@ -24,14 +24,13 @@ interface AvailabilityViewerProps {
   times: string[]
   people: PersonResponse[]
   table?: ReturnType<typeof calculateTable>
-  eventId?: string // used to seed PRNG
   timeFormat: '12h' | '24h'
   timezone: string
   eventTimezone?: string
   displayBestFit: boolean
 }
 
-const AvailabilityViewer = ({ times, people, table, eventId, timeFormat, timezone, eventTimezone, displayBestFit }: AvailabilityViewerProps) => {
+const AvailabilityViewer = ({ times, people, table, timeFormat, timezone, eventTimezone, displayBestFit }: AvailabilityViewerProps) => {
   const { t, i18n } = useTranslation('event')
 
   const highlight = useStore(useSettingsStore, state => state.highlight)
@@ -99,34 +98,39 @@ const AvailabilityViewer = ({ times, people, table, eventId, timeFormat, timezon
         ? people.filter(p => filteredPeople.includes(p.name))
         : [], 
       meetingDuration,
-      eventId ?? "",
       timeMap,
     ),
-    [times, filteredPeople, people, meetingDuration, eventId, timeMap, displayBestFit]
+    [times, filteredPeople, people, meetingDuration, timeMap, displayBestFit]
   )
-  const formatTime = (timeScore: TimeScore | undefined) =>
-    timeScore ? {
-      time: timeToLocaleString(timeScore.time, i18n.language, timeFormat, timezone, eventTimezone),
-      stars: t('stars', {count: averageAndRound(timeScore.score, filteredPeople.length)})
+  const formatTime = (timeScore: TimeScore) => ({
+    time: timeToLocaleString(timeScore.time, i18n.language, timeFormat, timezone, eventTimezone),
+    stars: t('stars', {count: averageAndRound(timeScore.score, filteredPeople.length)}),
+  })
+  const formatPeople = (count: number) => t('group.people', {count: count})
+  const formatList = (items: string[]) => {
+    try {
+      return new Intl.ListFormat(i18n.language, { style: 'long', type: 'conjunction' }).format(items)
+    } catch {
+      return items.join(', ')
     }
-      : undefined
-  const formatPersonVotes = (count: number | undefined) =>
-    (count !== undefined) ? t('group.people', {count: count}) : undefined
-  const [bestFormatted, nextFormatted, bestVotesPeople, nextVotesPeople, noPrefPeople] =
-    useMemo(() => {
-      return [
-        formatTime(results.bestTime),
-        formatTime(results.nextBest),
-        formatPersonVotes(results.bestVotes),
-        formatPersonVotes(results.nextVotes),
-        ((results.bestVotes !== undefined) && (results.nextVotes !== undefined))
-          ? formatPersonVotes(
-            filteredPeople.length - results.bestVotes - results.nextVotes
-          )
-          : undefined
-      ]
-    },
-    [results, i18n.language, timeFormat, timezone, filteredPeople.length])
+  }
+  const star = useMemo(() => {
+    const best = results.bestTimes.map(formatTime)
+    const finalists = results.finalists.map(formatTime)
+    const hasVotes = results.firstVotes !== undefined && results.secondVotes !== undefined
+    return {
+      best,
+      finalists,
+      // all tied times, highest total score first
+      bestList: formatList(best.map(b => b.time)),
+      firstVotes: hasVotes ? formatPeople(results.firstVotes as number) : undefined,
+      secondVotes: hasVotes ? formatPeople(results.secondVotes as number) : undefined,
+      noPrefVotes: hasVotes
+        ? formatPeople(filteredPeople.length - (results.firstVotes as number) - (results.secondVotes as number))
+        : undefined,
+    }
+  },
+  [results, i18n.language, timeFormat, timezone, filteredPeople.length])
 
   /* End of STAR section */
 
@@ -286,7 +290,7 @@ const AvailabilityViewer = ({ times, people, table, eventId, timeFormat, timezon
       </div>
     </div>
 
-    {bestFormatted && <Content isCentered>
+    {star.best.length > 0 && <Content isCentered>
       <div>
         <SelectField
           label={t('group.best_fit1')}
@@ -298,30 +302,58 @@ const AvailabilityViewer = ({ times, people, table, eventId, timeFormat, timezon
           options={durationLabels}
         />
         <p>
-          <Trans i18nKey="group.best_fit2" t={t} i18n={i18n}>
-            {/* eslint-disable-next-line */}
-            {/* @ts-ignore */}
-            _<strong className={styles.bestTime}>{{time: bestFormatted.time}}</strong>
-          </Trans>
+          {star.best.length === 1
+            ? <Trans i18nKey="group.best_fit2" t={t} i18n={i18n}>
+              {/* eslint-disable-next-line */}
+              {/* @ts-ignore */}
+              _<strong className={styles.bestTime}>{{time: star.best[0].time}}</strong>
+            </Trans>
+            : <Trans i18nKey="group.best_fit2_tied" t={t} i18n={i18n}>
+              {/* eslint-disable-next-line */}
+              {/* @ts-ignore */}
+              _<strong className={styles.bestTime}>{{times: star.bestList}}</strong>
+            </Trans>}
         </p>
-        {nextFormatted
-        && (bestVotesPeople !== undefined)
-        && (nextVotesPeople !== undefined)
-        && (noPrefPeople !== undefined)
-        && <p>
-          <Trans i18nKey="group.best_fit3" t={t} i18n={i18n}>
-            {/* eslint-disable-next-line */}
-            {/* @ts-ignore */}
-            <strong>{{bestTime: bestFormatted.time}}</strong>
-            {/* eslint-disable-next-line */}
-            {/* @ts-ignore */}
-            _<strong>{{nextBest: nextFormatted.time}}</strong>
-            _{{ bestStars: bestFormatted.stars }}
-            _{{ nextStars: nextFormatted.stars }}
-            _{{ bestVotesPeople }}
-            _{{ nextVotesPeople }}
-            _{{ noPrefPeople }}_
-          </Trans>
+        {star.finalists.length >= 2 && <p>
+          {/* Who the finalists are */}
+          {results.numTopScorers >= 2
+            ? t('group.finalists_top_tied', {count: star.finalists.length, stars: star.finalists[0].stars})
+            : star.finalists.length === 2
+              ? <Trans i18nKey="group.finalists_two" t={t} i18n={i18n} values={{
+                top: star.finalists[0].time,
+                next: star.finalists[1].time,
+                topStars: star.finalists[0].stars,
+                nextStars: star.finalists[1].stars,
+              }} />
+              : <Trans i18nKey="group.finalists_top_one" t={t} i18n={i18n} values={{
+                top: star.finalists[0].time,
+                topStars: star.finalists[0].stars,
+                count: star.finalists.length - 1,
+                nextStars: star.finalists[1].stars,
+              }} />}
+          <br />
+          {/* How the head-to-head matchups went */}
+          {star.finalists.length === 2
+            ? <Trans
+              i18nKey={star.best.length === 1 ? 'group.runoff_two' : 'group.runoff_two_tied'}
+              t={t}
+              i18n={i18n}
+              values={{
+                first: star.finalists[0].time,
+                second: star.finalists[1].time,
+                firstVotes: star.firstVotes,
+                secondVotes: star.secondVotes,
+                noPrefVotes: star.noPrefVotes,
+              }}
+            />
+            : results.tieBreak === 'cycle'
+              ? t('group.runoff_cycle', {count: star.finalists.length})
+              : star.best.length === 1
+                ? <Trans i18nKey="group.runoff_one" t={t} i18n={i18n} values={{
+                  count: star.finalists.length,
+                  best: star.best[0].time,
+                }} />
+                : t('group.runoff_tied', {count: star.best.length, finalists: star.finalists.length})}
         </p>}
       </div>
     </Content>}

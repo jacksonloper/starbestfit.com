@@ -173,7 +173,6 @@ const EventAvailabilities = ({ event }: EventAvailabilitiesProps) => {
       times={expandedTimes}
       people={people}
       table={table}
-      eventId={event?.id}
       timeFormat={timeFormat}
       timezone={timezone}
       eventTimezone={event?.timezone}
