@@ -63,7 +63,7 @@
     "runoff_two_tied": "Between these two finalists, {{firstVotes}} preferred <strong>{{first}}</strong>, {{secondVotes}} preferred <strong>{{second}}</strong>, and {{noPrefVotes}} expressed no preference, so the two are tied.",
     "runoff_one": "Comparing all {{count}} finalists head-to-head, <strong>{{best}}</strong> is the only one that is preferred by at least as many people as every other finalist.",
     "runoff_tied": "Comparing all {{finalists}} finalists head-to-head, {{count}} of them are preferred by at least as many people as every other finalist, so they are tied.",
-    "runoff_cycle": "Comparing all {{count}} finalists head-to-head, every finalist loses at least one matchup, so the tie is broken by most head-to-head wins and then most five-star ratings.",
+    "runoff_cycle": "Comparing all {{count}} finalists head-to-head, every finalist loses at least one matchup, so none of them stands out and all are shown.",
     "hours_one": "{{count}} hour",
     "hours_other": "{{count}} hours",
     "minutes": "minutes",

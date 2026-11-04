@@ -24,14 +24,13 @@ interface AvailabilityViewerProps {
   times: string[]
   people: PersonResponse[]
   table?: ReturnType<typeof calculateTable>
-  eventId?: string // used to seed PRNG
   timeFormat: '12h' | '24h'
   timezone: string
   eventTimezone?: string
   displayBestFit: boolean
 }
 
-const AvailabilityViewer = ({ times, people, table, eventId, timeFormat, timezone, eventTimezone, displayBestFit }: AvailabilityViewerProps) => {
+const AvailabilityViewer = ({ times, people, table, timeFormat, timezone, eventTimezone, displayBestFit }: AvailabilityViewerProps) => {
   const { t, i18n } = useTranslation('event')
 
   const highlight = useStore(useSettingsStore, state => state.highlight)
@@ -99,10 +98,9 @@ const AvailabilityViewer = ({ times, people, table, eventId, timeFormat, timezon
         ? people.filter(p => filteredPeople.includes(p.name))
         : [], 
       meetingDuration,
-      eventId ?? "",
       timeMap,
     ),
-    [times, filteredPeople, people, meetingDuration, eventId, timeMap, displayBestFit]
+    [times, filteredPeople, people, meetingDuration, timeMap, displayBestFit]
   )
   const formatTime = (timeScore: TimeScore) => ({
     time: timeToLocaleString(timeScore.time, i18n.language, timeFormat, timezone, eventTimezone),
@@ -348,7 +346,7 @@ const AvailabilityViewer = ({ times, people, table, eventId, timeFormat, timezon
                 noPrefVotes: star.noPrefVotes,
               }}
             />
-            : results.tieBreak === 'mostWins'
+            : results.tieBreak === 'cycle'
               ? t('group.runoff_cycle', {count: star.finalists.length})
               : star.best.length === 1
                 ? <Trans i18nKey="group.runoff_one" t={t} i18n={i18n} values={{
